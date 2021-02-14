@@ -1,48 +1,54 @@
 import "reflect-metadata";
-import {createConnection} from "typeorm";
-import * as express from "express";
-import * as bodyParser from "body-parser";
-import {Request, Response} from "express";
-import {Routes} from "./routes";
-import {User} from "./entity/User";
-
+import { createConnection } from "typeorm";
+import * as express from 'express';
+import * as session from 'express-session'
+import UserRoute from './route/UserRoute'
+import PostRoute from './route/PostRoute'
+import PostCategoryRoute from './route/PostCategoryRoute'
+import WeatherRoute from './route/WeatherRoute'
+import * as cors from 'cors';
+import * as bodyParser from 'body-parser';
+import * as path from 'path'
+import * as https from 'https'
+import * as fs from 'fs'
 createConnection().then(async connection => {
 
-    // create express app
+
     const app = express();
+    const key = fs.readFileSync('./.ssh/key.pem', 'utf8');
+    const cert = fs.readFileSync('./.ssh/cert.pem', 'utf8');
+    app.use(express.static(path.join(__dirname, 'build')));
+    app.use(cors({
+        credentials: true,//protiv xss napada
+
+        methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+        origin: 'http://localhost:3000'
+
+    }));
     app.use(bodyParser.json());
+    app.use(session({
+        secret: 'keyboard cat',
+        resave: false,
 
-    // register express routes from defined application routes
-    Routes.forEach(route => {
-        (app as any)[route.method](route.route, (req: Request, res: Response, next: Function) => {
-            const result = (new (route.controller as any))[route.action](req, res, next);
-            if (result instanceof Promise) {
-                result.then(result => result !== null && result !== undefined ? res.send(result) : undefined);
+        saveUninitialized: false,
+        cookie: {
+            secure: true,
+            maxAge: 1000 * 60 * 10,//10min
+            httpOnly: true,
+        }
 
-            } else if (result !== null && result !== undefined) {
-                res.json(result);
-            }
-        });
+    }))
+    app.use('/weather', WeatherRoute);
+    app.use('/user', UserRoute);
+    app.use('/post', PostRoute);
+    app.use('/postCategory', PostCategoryRoute);
+    app.get('/*', function (req, res) {
+        res.sendFile(path.join(__dirname, 'build', 'index.html'));
     });
-
-    // setup express app here
-    // ...
-
-    // start express server
-    app.listen(3000);
-
-    // insert new users for test
-    await connection.manager.save(connection.manager.create(User, {
-        firstName: "Timber",
-        lastName: "Saw",
-        age: 27
-    }));
-    await connection.manager.save(connection.manager.create(User, {
-        firstName: "Phantom",
-        lastName: "Assassin",
-        age: 24
-    }));
-
-    console.log("Express server has started on port 3000. Open http://localhost:3000/users to see results");
+    const server = https.createServer({
+        key: key,
+        cert: cert,
+    }, app)
+    server.listen(process.env.PORT || 5000, () => console.log('app is listening'))
 
 }).catch(error => console.log(error));
